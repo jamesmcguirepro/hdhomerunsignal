@@ -62,6 +62,7 @@ import AntennaMode from './AntennaMode';
 
 const REGIONS = [
   { value: 'us', label: 'United States' },
+  { value: 'ca', label: 'Canada' },
   { value: 'eu', label: 'United Kingdom / EU' }
 ];
 
@@ -71,6 +72,12 @@ const CHANNEL_MAPS = {
     { value: 'us-cable', label: 'US Cable' },
     { value: 'us-hrc', label: 'US HRC' },
     { value: 'us-irc', label: 'US IRC' }
+  ],
+  ca: [
+    { value: 'ca-bcast', label: 'CA Broadcast' },
+    { value: 'ca-cable', label: 'CA Cable' },
+    { value: 'ca-hrc', label: 'CA HRC' },
+    { value: 'ca-irc', label: 'CA IRC' }
   ],
   eu: [
     { value: 'eu-bcast', label: 'UK/EU Broadcast' },
