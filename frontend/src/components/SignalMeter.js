@@ -617,7 +617,7 @@ function SignalMeter() {
         borderWidth: 2,
         fill: true,
         tension: 0.4,
-        pointRadius: 2,
+        pointRadius: 1.5,
         pointHoverRadius: 3,
         pointBackgroundColor: 'rgba(76, 175, 80, 1)',
         pointBorderColor: 'rgba(0, 0, 0, 0.4)',
@@ -632,7 +632,7 @@ function SignalMeter() {
         borderWidth: 2,
         fill: true,
         tension: 0.4,
-        pointRadius: 2,
+        pointRadius: 1.5,
         pointHoverRadius: 3,
         pointBackgroundColor: 'rgba(255, 152, 0, 1)',
         pointBorderColor: 'rgba(0, 0, 0, 0.4)',
@@ -642,35 +642,6 @@ function SignalMeter() {
     ]
   };
 
-  // Plugin that draws a thin vertical "now" line at the rightmost data point
-  const nowLinePlugin = {
-    id: 'nowLine',
-    afterDraw(chart) {
-      const { ctx, chartArea, scales } = chart;
-      const xScale = scales.x;
-      if (!xScale || !chartArea) return;
-
-      const dataCount = chart.data.labels?.length;
-      if (!dataCount || dataCount < 2) return;
-
-      const x = xScale.getPixelForValue(dataCount - 1);
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(x, chartArea.top);
-      ctx.lineTo(x, chartArea.bottom);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.stroke();
-
-      // "now" label above the line
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.font = '9px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText('now', x - 3, chartArea.top + 9);
-      ctx.restore();
-    }
-  };
 
   const signalChartOptions = {
     responsive: true,
@@ -895,7 +866,7 @@ function SignalMeter() {
                     {/* Signal + SNR History Chart */}
                     {(
                       <Box sx={{ height: 180, mt: 0.5 }}>
-                        <Line data={signalChartData} options={signalChartOptions} plugins={[nowLinePlugin]} />
+                        <Line data={signalChartData} options={signalChartOptions} />
                       </Box>
                     )}
                   </>
