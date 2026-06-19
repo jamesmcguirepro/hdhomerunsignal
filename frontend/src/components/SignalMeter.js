@@ -1193,6 +1193,7 @@ function SignalMeter() {
                               onClick={() => {
                                 const rawChannel = tunerStatus?.channel?.split(':')[1];
                                 if (!rawChannel) return;
+                                // If it's already a frequency (9+ digits), use as-is; otherwise convert RF channel to frequency
                                 const freq = rawChannel.length >= 9 ? rawChannel : channelToFrequency(rawChannel, region);
                                 if (!freq) return;
                                 const channelName = `${program.callsign} ${program.virtualChannel}`;
@@ -1236,7 +1237,6 @@ function SignalMeter() {
               try {
                 const rawChannel = tunerStatus?.channel?.split(':')[1];
                 if (!rawChannel) return;
-                // If it's already a frequency (9+ digits), use as-is; otherwise convert RF channel to frequency
                 const freq = rawChannel.length >= 9 ? rawChannel : channelToFrequency(rawChannel, region);
                 if (!freq) return;
                 const response = await axios.get(
