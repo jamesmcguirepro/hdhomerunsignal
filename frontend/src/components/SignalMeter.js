@@ -468,7 +468,9 @@ function SignalMeter() {
           }
         } else {
           const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-          if (channelMatch) setDirectChannel(channelMatch[1]);
+          if (channelMatch) {
+            setDirectChannel(channelMatch[1]);
+          }
         }
       }
     }
