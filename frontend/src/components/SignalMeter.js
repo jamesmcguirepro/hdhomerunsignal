@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Card,
@@ -56,9 +56,35 @@ import {
   PlayArrow as PlayIcon,
   ContentCopy as CopyIcon
 } from '@mui/icons-material';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+} from 'chart.js';
 import axios from 'axios';
 import io from 'socket.io-client';
 import AntennaMode from './AntennaMode';
+
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
+
+const MAX_SIGNAL_HISTORY = 60; // 60 seconds of data
 
 const REGIONS = [
   { value: 'us', label: 'United States' },
@@ -90,29 +116,18 @@ function frequencyToChannel(freqHz, region = 'us') {
   const freqMhz = freqHz / 1000000;
 
   if (region === 'eu') {
-    // UK/EU DVB-T/T2 frequencies
-    // Band III (VHF): 174-230 MHz → channels 5-12
     if (freqMhz >= 174 && freqMhz <= 230) {
-      // Channel 5: 177.5 MHz center, then +7 MHz for each channel
       const channel = Math.round((freqMhz - 177.5) / 7) + 5;
       return Math.max(5, Math.min(12, channel));
     }
-
-    // Band IV/V (UHF): 470-790 MHz → channels 21-60
-    // Note: Post-700MHz clearance, many regions only use 21-48
     if (freqMhz >= 470 && freqMhz <= 790) {
-      // Channel 21: 474 MHz center, then +8 MHz for each channel
       const channel = Math.round((freqMhz - 474) / 8) + 21;
       return Math.max(21, Math.min(60, channel));
     }
-
-    return null; // Unknown frequency range
+    return null;
   }
 
-  // US ATSC frequencies
-  // VHF Low (channels 2-6): 54-88 MHz
   if (freqMhz >= 54 && freqMhz <= 88) {
-    // Channel 2: 57 MHz center, Channel 3: 63, Channel 4: 69, Channel 5: 79, Channel 6: 85
     const vhfLowChannels = [
       { ch: 2, freq: 57 }, { ch: 3, freq: 63 }, { ch: 4, freq: 69 },
       { ch: 5, freq: 79 }, { ch: 6, freq: 85 }
@@ -129,21 +144,17 @@ function frequencyToChannel(freqHz, region = 'us') {
     return closest.ch;
   }
 
-  // VHF High (channels 7-13): 174-216 MHz
   if (freqMhz >= 174 && freqMhz <= 216) {
-    // Channel 7: 177 MHz center, then +6 MHz for each channel
     const channel = Math.round((freqMhz - 177) / 6) + 7;
     return Math.max(7, Math.min(13, channel));
   }
 
-  // UHF (channels 14-36): 470-608 MHz (post-repack)
   if (freqMhz >= 470 && freqMhz <= 608) {
-    // Channel 14: 473 MHz center, then +6 MHz for each channel
     const channel = Math.round((freqMhz - 473) / 6) + 14;
     return Math.max(14, Math.min(36, channel));
   }
 
-  return null; // Unknown frequency range
+  return null;
 }
 
 // Convert broadcast channel number to center frequency (in Hz)
@@ -152,28 +163,22 @@ function channelToFrequency(channel, region = 'us') {
   if (isNaN(ch)) return null;
 
   if (region === 'eu') {
-    // Band III (VHF): channels 5-12
     if (ch >= 5 && ch <= 12) {
       return ((ch - 5) * 7 + 177.5) * 1000000;
     }
-    // Band IV/V (UHF): channels 21-60
     if (ch >= 21 && ch <= 60) {
       return ((ch - 21) * 8 + 474) * 1000000;
     }
     return null;
   }
 
-  // US ATSC frequencies
-  // VHF Low (channels 2-6)
   const vhfLow = { 2: 57, 3: 63, 4: 69, 5: 79, 6: 85 };
   if (vhfLow[ch]) return vhfLow[ch] * 1000000;
 
-  // VHF High (channels 7-13): 177 MHz + 6 MHz per channel
   if (ch >= 7 && ch <= 13) {
     return ((ch - 7) * 6 + 177) * 1000000;
   }
 
-  // UHF (channels 14-36): 473 MHz + 6 MHz per channel
   if (ch >= 14 && ch <= 36) {
     return ((ch - 14) * 6 + 473) * 1000000;
   }
@@ -184,12 +189,11 @@ function channelToFrequency(channel, region = 'us') {
 // Get channel range for region
 function getChannelRange(region) {
   return region === 'eu'
-    ? { min: 5, max: 60 }  // EU: VHF 5-12, UHF 21-60
-    : { min: 2, max: 36 }; // US: VHF 2-13, UHF 14-36
+    ? { min: 5, max: 60 }
+    : { min: 2, max: 36 };
 }
 
 function SignalMeter() {
-  // Load region from localStorage, default to 'us'
   const [region, setRegion] = useState(() => {
     return localStorage.getItem('hdhr-region') || 'us';
   });
@@ -199,7 +203,6 @@ function SignalMeter() {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [selectedTuner, setSelectedTuner] = useState(0);
   const [channelMap, setChannelMap] = useState(() => {
-    // Set default channel map based on region
     return region === 'eu' ? 'eu-bcast' : 'us-bcast';
   });
   const [selectedChannel, setSelectedChannel] = useState('');
@@ -215,36 +218,65 @@ function SignalMeter() {
   const [isAtsc3Channel, setIsAtsc3Channel] = useState(false);
   const [antennaMode, setAntennaMode] = useState(false);
   const [allTunersData, setAllTunersData] = useState([]);
-  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, program }
+  const [contextMenu, setContextMenu] = useState(null);
 
-  // Refs to track current device/tuner/mode for reconnection
+  // Signal history for the chart
+  const [signalHistory, setSignalHistory] = useState({
+    signal: [],
+    snr: [],
+    timestamps: []
+  });
+  const lastChannelForChartRef = useRef(null);
+
   const selectedDeviceRef = React.useRef(selectedDevice);
   const selectedTunerRef = React.useRef(selectedTuner);
   const antennaModeRef = React.useRef(antennaMode);
   const deviceInfoRef = React.useRef(deviceInfo);
   const pendingProgramFetchRef = React.useRef(null);
 
-  // Save region preference to localStorage
   useEffect(() => {
     localStorage.setItem('hdhr-region', region);
   }, [region]);
 
-  // Keep refs in sync with state
-  React.useEffect(() => {
-    selectedDeviceRef.current = selectedDevice;
-  }, [selectedDevice]);
+  React.useEffect(() => { selectedDeviceRef.current = selectedDevice; }, [selectedDevice]);
+  React.useEffect(() => { selectedTunerRef.current = selectedTuner; }, [selectedTuner]);
+  React.useEffect(() => { antennaModeRef.current = antennaMode; }, [antennaMode]);
+  React.useEffect(() => { deviceInfoRef.current = deviceInfo; }, [deviceInfo]);
 
-  React.useEffect(() => {
-    selectedTunerRef.current = selectedTuner;
+  // Update signal history whenever tunerStatus changes
+  useEffect(() => {
+    if (!tunerStatus) return;
+
+    const currentChannel = tunerStatus.channel || 'none';
+
+    // Reset history if channel changed
+    if (lastChannelForChartRef.current !== null && lastChannelForChartRef.current !== currentChannel) {
+      setSignalHistory({ signal: [], snr: [], timestamps: [] });
+    }
+    lastChannelForChartRef.current = currentChannel;
+
+    if (currentChannel === 'none' || !tunerStatus.lock) return;
+
+    setSignalHistory(prev => {
+      const signal = [...prev.signal, tunerStatus.ss || 0];
+      const snr = [...prev.snr, tunerStatus.snq || 0];
+      const timestamps = [...prev.timestamps, new Date().toLocaleTimeString()];
+
+      if (signal.length > MAX_SIGNAL_HISTORY) {
+        signal.shift();
+        snr.shift();
+        timestamps.shift();
+      }
+
+      return { signal, snr, timestamps };
+    });
+  }, [tunerStatus]);
+
+  // Clear chart history when tuner changes
+  useEffect(() => {
+    setSignalHistory({ signal: [], snr: [], timestamps: [] });
+    lastChannelForChartRef.current = null;
   }, [selectedTuner]);
-
-  React.useEffect(() => {
-    antennaModeRef.current = antennaMode;
-  }, [antennaMode]);
-
-  React.useEffect(() => {
-    deviceInfoRef.current = deviceInfo;
-  }, [deviceInfo]);
 
   useEffect(() => {
     discoverDevices();
@@ -260,7 +292,6 @@ function SignalMeter() {
     newSocket.on('tuner-status', (status) => {
       setTunerStatus(status);
 
-      // Auto-detect ATSC 3.0 based on presence of PLP data
       const hasAtsc3Data = status.plpInfo && Object.keys(status.plpInfo).length > 0;
       setIsAtsc3Channel(hasAtsc3Data);
 
@@ -281,63 +312,38 @@ function SignalMeter() {
       setAllTunersData(data);
     });
 
-    // Handle socket connection/reconnection
     let hasConnectedOnce = false;
 
     newSocket.on('connect', () => {
       if (hasConnectedOnce) {
         console.log('Socket reconnected - restarting monitoring');
-        // On reconnect, restart monitoring if we have a device selected
         if (selectedDeviceRef.current) {
-          // Add small delay to ensure socket is fully ready
           setTimeout(() => {
             if (antennaModeRef.current) {
-              // Restart antenna mode
-              console.log('Emitting start-antenna-mode for device:', selectedDeviceRef.current, 'tuners:', deviceInfoRef.current?.tuners);
               newSocket.emit('start-antenna-mode', {
                 deviceId: selectedDeviceRef.current,
                 tunerCount: deviceInfoRef.current?.tuners || 2
               });
             } else {
-              // Restart normal monitoring
-              console.log('Emitting start-monitoring for device:', selectedDeviceRef.current, 'tuner:', selectedTunerRef.current);
               newSocket.emit('start-monitoring', {
                 deviceId: selectedDeviceRef.current,
                 tuner: selectedTunerRef.current
               });
             }
           }, 100);
-        } else {
-          console.log('No device selected, skipping monitoring restart');
         }
       } else {
         console.log('Socket connected (initial)');
         hasConnectedOnce = true;
-        // Don't start monitoring here - let the useEffect handle it
       }
     });
 
-    newSocket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
-    });
+    newSocket.on('disconnect', (reason) => { console.log('Socket disconnected:', reason); });
+    newSocket.on('connect_error', (error) => { console.log('Socket connection error:', error.message); });
+    newSocket.on('reconnect_attempt', (attemptNumber) => { console.log('Reconnection attempt:', attemptNumber); });
+    newSocket.on('reconnect_error', (error) => { console.log('Reconnection error:', error.message); });
+    newSocket.on('reconnect_failed', () => { console.log('Reconnection failed - gave up'); });
 
-    newSocket.on('connect_error', (error) => {
-      console.log('Socket connection error:', error.message);
-    });
-
-    newSocket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('Reconnection attempt:', attemptNumber);
-    });
-
-    newSocket.on('reconnect_error', (error) => {
-      console.log('Reconnection error:', error.message);
-    });
-
-    newSocket.on('reconnect_failed', () => {
-      console.log('Reconnection failed - gave up');
-    });
-
-    // PWA install prompt handling
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -349,7 +355,6 @@ function SignalMeter() {
       setDeferredPrompt(null);
     };
 
-    // Check if already installed
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
       setShowInstallButton(false);
     } else {
@@ -368,63 +373,42 @@ function SignalMeter() {
 
   useEffect(() => {
     if (selectedDevice && socket) {
-      console.log('useEffect: Starting monitoring for device:', selectedDevice, 'tuner:', selectedTuner);
-      socket.emit('start-monitoring', {
-        deviceId: selectedDevice,
-        tuner: selectedTuner
-      });
+      socket.emit('start-monitoring', { deviceId: selectedDevice, tuner: selectedTuner });
     }
     return () => {
-      if (socket) {
-        console.log('useEffect cleanup: Stopping monitoring');
-        socket.emit('stop-monitoring');
-      }
+      if (socket) socket.emit('stop-monitoring');
     };
   }, [selectedDevice, selectedTuner, socket]);
 
-  // Update directChannel input field when tuner status changes
   useEffect(() => {
     if (tunerStatus?.channel) {
       if (tunerStatus.channel === 'none') {
-        // Tuner is cleared/stopped
         setDirectChannel('');
         setCurrentChannelPrograms([]);
       } else {
-        // Check if format includes frequency (e.g., "auto6t:605028615")
         const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
         if (freqMatch) {
-          // Has frequency - convert to channel number
           const freqHz = parseInt(freqMatch[1]);
           const channel = frequencyToChannel(freqHz, region);
-          if (channel) {
-            console.log(`Converted frequency ${freqHz} Hz to channel ${channel}`);
-            setDirectChannel(channel.toString());
-          }
+          if (channel) setDirectChannel(channel.toString());
         } else {
-          // Standard format (e.g., "auto:4" -> "4", "13" -> "13")
           const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-          if (channelMatch) {
-            setDirectChannel(channelMatch[1]);
-          }
+          if (channelMatch) setDirectChannel(channelMatch[1]);
         }
       }
     }
   }, [tunerStatus?.channel]);
 
-  // Auto-fetch programs when channel is already tuned on initial load or after tuner change
   useEffect(() => {
     if (tunerStatus?.lock &&
         tunerStatus.channel &&
         tunerStatus.channel !== 'none' &&
         currentChannelPrograms.length === 0 &&
         selectedDevice) {
-      // Channel is tuned but we don't have program info yet - fetch it
-      console.log('Auto-fetching programs for tuner', selectedTuner);
       getCurrentChannelPrograms();
     }
   }, [tunerStatus?.lock, tunerStatus?.channel, selectedDevice, selectedTuner]);
 
-  // Clear all data when tuner changes
   useEffect(() => {
     console.log('Tuner changed to:', selectedTuner, '- clearing old channel data');
     setCurrentChannelPrograms([]);
@@ -432,29 +416,18 @@ function SignalMeter() {
     setL1Info(null);
     setIsAtsc3Channel(false);
     setDirectChannel('');
-    // Note: monitoring will restart via the monitoring useEffect, and
-    // the auto-fetch useEffect will repopulate data for the new tuner
   }, [selectedTuner]);
 
-  // Handle antenna mode switching
   useEffect(() => {
     if (!socket || !selectedDevice || !deviceInfo) return;
 
     if (antennaMode) {
-      console.log('Switching to antenna mode');
       socket.emit('stop-monitoring');
-      socket.emit('start-antenna-mode', {
-        deviceId: selectedDevice,
-        tunerCount: deviceInfo.tuners
-      });
+      socket.emit('start-antenna-mode', { deviceId: selectedDevice, tunerCount: deviceInfo.tuners });
     } else {
-      console.log('Switching to normal mode');
       socket.emit('stop-monitoring');
-      socket.emit('start-monitoring', {
-        deviceId: selectedDevice,
-        tuner: selectedTuner
-      });
-      setAllTunersData([]); // Clear antenna mode data
+      socket.emit('start-monitoring', { deviceId: selectedDevice, tuner: selectedTuner });
+      setAllTunersData([]);
     }
   }, [antennaMode, selectedDevice, socket, deviceInfo, selectedTuner]);
 
@@ -464,13 +437,11 @@ function SignalMeter() {
       const url = force ? '/api/devices?force=true' : '/api/devices';
       const response = await axios.get(url);
       setDevices(response.data);
-      // Auto-select first online device
       const firstOnlineDevice = response.data.find(d => d.online !== false);
       if (firstOnlineDevice) {
         setSelectedDevice(firstOnlineDevice.id);
         await getDeviceInfo(firstOnlineDevice.id);
       } else if (response.data.length > 0) {
-        // All devices offline - clear selection
         setSelectedDevice('');
         setDeviceInfo(null);
       }
@@ -483,7 +454,6 @@ function SignalMeter() {
   const getDeviceInfo = async (deviceId) => {
     try {
       const response = await axios.get(`/api/devices/${deviceId}/info`);
-      console.log('Device info received:', response.data);
       setDeviceInfo(response.data);
       return response.data;
     } catch (error) {
@@ -492,50 +462,33 @@ function SignalMeter() {
     }
   };
 
-
-
   const tuneToDirectChannel = async (channel) => {
     if (!selectedDevice || !channel) return;
 
     try {
-      // Cancel any pending program fetch from previous channel change
       if (pendingProgramFetchRef.current) {
         pendingProgramFetchRef.current.cancelled = true;
         pendingProgramFetchRef.current = null;
       }
 
-      // Clear old data immediately when changing channels
       setCurrentChannelPrograms([]);
       setPlpInfo(null);
       setL1Info(null);
       setIsAtsc3Channel(false);
 
-      // Use regular tuning - let backend auto-detect ATSC 3.0
-      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, {
-        channel
-      });
-
+      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, { channel });
       setSelectedChannel(channel);
-      // Don't clear directChannel - it will be updated by the useEffect when tuner status updates
 
-      // Create cancellation token for this fetch operation
       const fetchToken = { cancelled: false };
       pendingProgramFetchRef.current = fetchToken;
 
-      // Wait for tuner to lock with progressive delays
       const waitAndGetPrograms = async () => {
-        // Initial wait
         await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Check if this operation was cancelled
         if (fetchToken.cancelled) return;
 
         const firstResponse = await getCurrentChannelPrograms();
 
-        // Try again after longer delay for slow-locking channels
         await new Promise(resolve => setTimeout(resolve, 4000));
-
-        // Check again if this operation was cancelled before updating state
         if (fetchToken.cancelled) return;
 
         const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
@@ -552,7 +505,6 @@ function SignalMeter() {
 
   const getCurrentChannelPrograms = async () => {
     if (!selectedDevice) return [];
-
     try {
       const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
       setCurrentChannelPrograms(response.data);
@@ -566,21 +518,15 @@ function SignalMeter() {
 
   const incrementChannel = async () => {
     if (!selectedDevice) return;
-
-    // Clear old data immediately
     setCurrentChannelPrograms([]);
     setPlpInfo(null);
     setL1Info(null);
     setIsAtsc3Channel(false);
 
     const channelRange = getChannelRange(region);
-
-    // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
-    // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
-      // Check for frequency format first
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
       if (freqMatch) {
         const freqHz = parseInt(freqMatch[1]);
@@ -592,7 +538,6 @@ function SignalMeter() {
     }
 
     const nextChannel = Math.min(channelRange.max, currentChannelNum + 1);
-
     try {
       await tuneToDirectChannel(nextChannel.toString());
     } catch (error) {
@@ -602,21 +547,15 @@ function SignalMeter() {
 
   const decrementChannel = async () => {
     if (!selectedDevice) return;
-
-    // Clear old data immediately
     setCurrentChannelPrograms([]);
     setPlpInfo(null);
     setL1Info(null);
     setIsAtsc3Channel(false);
 
     const channelRange = getChannelRange(region);
-
-    // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
-    // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
-      // Check for frequency format first
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
       if (freqMatch) {
         const freqHz = parseInt(freqMatch[1]);
@@ -628,7 +567,6 @@ function SignalMeter() {
     }
 
     const prevChannel = Math.max(channelRange.min, currentChannelNum - 1);
-
     try {
       await tuneToDirectChannel(prevChannel.toString());
     } catch (error) {
@@ -638,15 +576,12 @@ function SignalMeter() {
 
   const clearTuner = async () => {
     if (!selectedDevice) return;
-    
     try {
-      // Clear all data immediately
       setDirectChannel('');
       setCurrentChannelPrograms([]);
       setPlpInfo(null);
       setL1Info(null);
       setIsAtsc3Channel(false);
-      
       await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/clear`);
     } catch (error) {
       console.error('Failed to clear tuner:', error);
@@ -657,7 +592,6 @@ function SignalMeter() {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
-      console.log(`User response to the install prompt: ${outcome}`);
       setDeferredPrompt(null);
       setShowInstallButton(false);
     }
@@ -672,6 +606,72 @@ function SignalMeter() {
   const formatDataRate = (bps) => {
     if (!bps) return '0.000 Mbps';
     return (bps / 1000000).toFixed(3) + ' Mbps';
+  };
+
+  // Chart config for signal + SNR history
+  const signalChartData = {
+    labels: signalHistory.timestamps,
+    datasets: [
+      {
+        label: 'Signal',
+        data: signalHistory.signal,
+        borderColor: 'rgba(76, 175, 80, 1)',
+        backgroundColor: 'rgba(76, 175, 80, 0.15)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0
+      },
+      {
+        label: 'SNR',
+        data: signalHistory.snr,
+        borderColor: 'rgba(255, 152, 0, 1)',
+        backgroundColor: 'rgba(255, 152, 0, 0.10)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0
+      }
+    ]
+  };
+
+  const signalChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      y: {
+        min: 0,
+        max: 100,
+        ticks: {
+          color: 'rgba(255, 255, 255, 0.6)',
+          font: { size: 10 },
+          callback: (v) => `${v}%`
+        },
+        grid: { color: 'rgba(255, 255, 255, 0.08)' }
+      },
+      x: { display: false }
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        align: 'end',
+        labels: {
+          color: 'rgba(255, 255, 255, 0.7)',
+          font: { size: 10 },
+          boxWidth: 12,
+          padding: 8
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {
+          label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y}%`
+        }
+      }
+    }
   };
 
   return (
@@ -690,14 +690,11 @@ function SignalMeter() {
                     onChange={(e) => {
                       const newRegion = e.target.value;
                       setRegion(newRegion);
-                      // Reset channel map to default for new region
                       setChannelMap(newRegion === 'eu' ? 'eu-bcast' : 'us-bcast');
                     }}
                   >
                     {REGIONS.map((r) => (
-                      <MenuItem key={r.value} value={r.value}>
-                        {r.label}
-                      </MenuItem>
+                      <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
@@ -709,18 +706,14 @@ function SignalMeter() {
                     onChange={async (e) => {
                       const newDeviceId = e.target.value;
                       setSelectedDevice(newDeviceId);
-
-                      // Clear old channel data when switching devices
                       setCurrentChannelPrograms([]);
                       setPlpInfo(null);
                       setL1Info(null);
                       setIsAtsc3Channel(false);
                       setDirectChannel('');
 
-                      // Get info for new device and adjust tuner if needed
                       const info = await getDeviceInfo(newDeviceId);
                       if (info && selectedTuner >= info.tuners) {
-                        // Current tuner doesn't exist on new device - switch to highest tuner
                         setSelectedTuner(info.tuners - 1);
                       }
                     }}
@@ -790,7 +783,7 @@ function SignalMeter() {
                   <Typography variant="h6" sx={{ fontSize: '1.1rem', minWidth: 'fit-content' }}>
                     {!tunerStatus?.channel || tunerStatus.channel === 'none' ? 'Stopped' : tunerStatus.channel}
                   </Typography>
-                  
+
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
                     <TextField
                       label="CH"
@@ -799,22 +792,13 @@ function SignalMeter() {
                       value={directChannel}
                       onChange={(e) => setDirectChannel(e.target.value)}
                       onKeyPress={(e) => {
-                        if (e.key === 'Enter') {
-                          tuneToDirectChannel(directChannel);
-                        }
+                        if (e.key === 'Enter') tuneToDirectChannel(directChannel);
                       }}
                       placeholder={region === 'eu' ? '60' : '36'}
                       sx={{
                         width: 60,
-                        '& .MuiOutlinedInput-root': {
-                          paddingLeft: 0,
-                          paddingRight: 0,
-                        },
-                        '& .MuiOutlinedInput-input': {
-                          padding: '6px 4px',
-                          textAlign: 'center',
-                          fontSize: '14px'
-                        }
+                        '& .MuiOutlinedInput-root': { paddingLeft: 0, paddingRight: 0 },
+                        '& .MuiOutlinedInput-input': { padding: '6px 4px', textAlign: 'center', fontSize: '14px' }
                       }}
                       disabled={!selectedDevice}
                       inputProps={{ maxLength: 2 }}
@@ -833,33 +817,42 @@ function SignalMeter() {
                     </Button>
                   </Box>
                 </Box>
-                
-                {/* Compact Signal Display */}
+
+                {/* Compact Signal Meters */}
                 {tunerStatus?.lock ? (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                    <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
-                        Signal: {tunerStatus.ss || 0}%
-                        {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.ssDb}dBm)</span>}
-                      </Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
+                  <>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1.5 }}>
+                      <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
+                          Signal: {tunerStatus.ss || 0}%
+                          {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.ssDb}dBm)</span>}
+                        </Typography>
+                        <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
+                      </Box>
+                      <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
+                          SNR: {tunerStatus.snq || 0}%
+                          {tunerStatus.snrDb && tunerStatus.snrDb > 0 && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.snrDb}dB)</span>}
+                        </Typography>
+                        <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
+                      </Box>
+                      <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>Sym: {tunerStatus.seq || 0}%</Typography>
+                        <LinearProgress variant="determinate" value={tunerStatus.seq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.seq || 0) } }} />
+                      </Box>
+                      <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
+                        <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
+                      </Box>
                     </Box>
-                    <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
-                        SNR: {tunerStatus.snq || 0}%
-                        {tunerStatus.snrDb && tunerStatus.snrDb > 0 && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.snrDb}dB)</span>}
-                      </Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
-                    </Box>
-                    <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>Sym: {tunerStatus.seq || 0}%</Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.seq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.seq || 0) } }} />
-                    </Box>
-                    <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
-                      <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
-                    </Box>
-                  </Box>
+
+                    {/* Signal + SNR History Chart */}
+                    {signalHistory.signal.length > 1 && (
+                      <Box sx={{ height: 100, mt: 0.5 }}>
+                        <Line data={signalChartData} options={signalChartOptions} />
+                      </Box>
+                    )}
+                  </>
                 ) : (
                   <Typography variant="body2" sx={{ textAlign: 'center', py: 1, color: 'text.secondary' }}>
                     No signal detected
@@ -884,9 +877,7 @@ function SignalMeter() {
                       onChange={(e) => setChannelMap(e.target.value)}
                     >
                       {CHANNEL_MAPS[region].map((map) => (
-                        <MenuItem key={map.value} value={map.value}>
-                          {map.label}
-                        </MenuItem>
+                        <MenuItem key={map.value} value={map.value}>{map.label}</MenuItem>
                       ))}
                     </Select>
                   </FormControl>
@@ -900,9 +891,7 @@ function SignalMeter() {
                         onChange={(e) => setSelectedTuner(e.target.value)}
                       >
                         {Array.from({ length: deviceInfo.tuners }, (_, i) => (
-                          <MenuItem key={i} value={i}>
-                            Tuner {i}
-                          </MenuItem>
+                          <MenuItem key={i} value={i}>Tuner {i}</MenuItem>
                         ))}
                       </Select>
                     </FormControl>
@@ -919,9 +908,9 @@ function SignalMeter() {
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  <Chip 
-                    label="ATSC 3.0 Channel Detected" 
-                    color="success" 
+                  <Chip
+                    label="ATSC 3.0 Channel Detected"
+                    color="success"
                     variant="outlined"
                     size="small"
                     sx={{ fontWeight: 600 }}
@@ -960,33 +949,17 @@ function SignalMeter() {
                       {Object.entries(plpInfo).map(([plpId, info]) => (
                         <TableRow key={plpId}>
                           <TableCell>
-                            <Chip 
-                              label={plpId} 
-                              size="small" 
-                              color="primary" 
-                              variant="outlined"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
+                            <Chip label={plpId} size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
                           </TableCell>
                           <TableCell>{info.modulation || 'N/A'}</TableCell>
                           <TableCell>{info.coderate || 'N/A'}</TableCell>
                           <TableCell>{info.layer || 'N/A'}</TableCell>
                           <TableCell>{info.timeInterleaving || 'N/A'}</TableCell>
                           <TableCell>
-                            <Chip 
-                              label={info.lls ? 'Yes' : 'No'} 
-                              size="small" 
-                              color={info.lls ? 'success' : 'default'}
-                              sx={{ height: 18, fontSize: '0.65rem' }}
-                            />
+                            <Chip label={info.lls ? 'Yes' : 'No'} size="small" color={info.lls ? 'success' : 'default'} sx={{ height: 18, fontSize: '0.65rem' }} />
                           </TableCell>
                           <TableCell>
-                            <Chip 
-                              label={info.lock ? 'Locked' : 'Unlocked'} 
-                              size="small" 
-                              color={info.lock ? 'success' : 'error'}
-                              sx={{ height: 18, fontSize: '0.65rem' }}
-                            />
+                            <Chip label={info.lock ? 'Locked' : 'Unlocked'} size="small" color={info.lock ? 'success' : 'error'} sx={{ height: 18, fontSize: '0.65rem' }} />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1012,9 +985,7 @@ function SignalMeter() {
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 500 }}>
                         {key.replace(/_/g, ' ').toUpperCase()}:
                       </Typography>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
-                        {value}
-                      </Typography>
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>{value}</Typography>
                     </Box>
                   ))}
                 </Box>
@@ -1047,13 +1018,7 @@ function SignalMeter() {
                         <TableRow key={index}>
                           <TableCell>{program.programNum}</TableCell>
                           <TableCell>
-                            <Chip 
-                              label={program.virtualChannel} 
-                              size="small" 
-                              color="primary" 
-                              variant="outlined"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
+                            <Chip label={program.virtualChannel} size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
                           </TableCell>
                           <TableCell>{program.callsign}</TableCell>
                           <TableCell>
@@ -1072,7 +1037,6 @@ function SignalMeter() {
                               onClick={() => {
                                 const rawChannel = tunerStatus?.channel?.split(':')[1];
                                 if (!rawChannel) return;
-                                // If it's already a frequency (9+ digits), use as-is; otherwise convert RF channel to frequency
                                 const freq = rawChannel.length >= 9 ? rawChannel : channelToFrequency(rawChannel, region);
                                 if (!freq) return;
                                 const channelName = `${program.callsign} ${program.virtualChannel}`;
@@ -1135,7 +1099,6 @@ function SignalMeter() {
           <ListItemText>Copy Stream URL</ListItemText>
         </MenuItem>
       </Menu>
-
     </Box>
   );
 }
