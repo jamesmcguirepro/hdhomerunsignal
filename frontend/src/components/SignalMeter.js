@@ -620,7 +620,11 @@ function SignalMeter() {
         borderWidth: 2,
         fill: true,
         tension: 0.4,
-        pointRadius: 0
+        pointRadius: 1.2,
+        pointHoverRadius: 5,
+        pointBackgroundColor: 'rgba(76, 175, 80, 1)',
+        pointBorderColor: 'rgba(0, 0, 0, 0.4)',
+        pointBorderWidth: 1
       },
       {
         label: 'SNR',
@@ -630,7 +634,11 @@ function SignalMeter() {
         borderWidth: 2,
         fill: true,
         tension: 0.4,
-        pointRadius: 0
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        pointBackgroundColor: 'rgba(255, 152, 0, 1)',
+        pointBorderColor: 'rgba(0, 0, 0, 0.4)',
+        pointBorderWidth: 1
       }
     ]
   };
@@ -887,7 +895,7 @@ function SignalMeter() {
 
                     {/* Signal + SNR History Chart */}
                     {signalHistory.signal.length > 1 && (
-                      <Box sx={{ height: 300, mt: 0.5 }}>
+                      <Box sx={{ height: 180, mt: 0.5 }}>
                         <Line data={signalChartData} options={signalChartOptions} plugins={[nowLinePlugin]} />
                       </Box>
                     )}
