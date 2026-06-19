@@ -681,6 +681,7 @@ function SignalMeter() {
     }
 
     const prevChannel = Math.max(channelRange.min, currentChannelNum - 1);
+
     try {
       await tuneToDirectChannel(prevChannel.toString());
     } catch (error) {
@@ -690,12 +691,15 @@ function SignalMeter() {
 
   const clearTuner = async () => {
     if (!selectedDevice) return;
+
     try {
+      // Clear all data immediately
       setDirectChannel('');
       setCurrentChannelPrograms([]);
       setPlpInfo(null);
       setL1Info(null);
       setIsAtsc3Channel(false);
+
       await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/clear`);
     } catch (error) {
       console.error('Failed to clear tuner:', error);
@@ -706,6 +710,7 @@ function SignalMeter() {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
+      console.log(`User response to the install prompt: ${outcome}`);
       setDeferredPrompt(null);
       setShowInstallButton(false);
     }
@@ -824,6 +829,7 @@ function SignalMeter() {
                     onChange={(e) => {
                       const newRegion = e.target.value;
                       setRegion(newRegion);
+                      // Reset channel map to default for new region
                       setChannelMap(newRegion === 'eu' ? 'eu-bcast' : 'us-bcast');
                     }}
                   >
@@ -840,14 +846,18 @@ function SignalMeter() {
                     onChange={async (e) => {
                       const newDeviceId = e.target.value;
                       setSelectedDevice(newDeviceId);
+                      // Clear old channel data when switching devices
+
                       setCurrentChannelPrograms([]);
                       setPlpInfo(null);
                       setL1Info(null);
                       setIsAtsc3Channel(false);
                       setDirectChannel('');
 
+                      // Get info for new device and adjust tuner if needed
                       const info = await getDeviceInfo(newDeviceId);
                       if (info && selectedTuner >= info.tuners) {
+                        // Current tuner doesn't exist on new device - switch to highest tuner
                         setSelectedTuner(info.tuners - 1);
                       }
                     }}
@@ -1214,6 +1224,7 @@ function SignalMeter() {
               try {
                 const rawChannel = tunerStatus?.channel?.split(':')[1];
                 if (!rawChannel) return;
+                // If it's already a frequency (9+ digits), use as-is; otherwise convert RF channel to frequency
                 const freq = rawChannel.length >= 9 ? rawChannel : channelToFrequency(rawChannel, region);
                 if (!freq) return;
                 const response = await axios.get(
