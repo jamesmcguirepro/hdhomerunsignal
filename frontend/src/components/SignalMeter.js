@@ -221,11 +221,14 @@ function SignalMeter() {
   const [contextMenu, setContextMenu] = useState(null);
 
   // Signal history for the chart
-  const [signalHistory, setSignalHistory] = useState({
-    signal: [],
-    snr: [],
-    timestamps: []
+  // Pre-fill with nulls so the chart is always MAX_SIGNAL_HISTORY wide;
+  // real data flows in from the right as samples arrive.
+  const emptyHistory = () => ({
+    signal: Array(MAX_SIGNAL_HISTORY).fill(null),
+    snr: Array(MAX_SIGNAL_HISTORY).fill(null),
+    timestamps: Array(MAX_SIGNAL_HISTORY).fill('')
   });
+  const [signalHistory, setSignalHistory] = useState(emptyHistory);
   const lastChannelForChartRef = useRef(null);
 
   const selectedDeviceRef = React.useRef(selectedDevice);
@@ -251,30 +254,24 @@ function SignalMeter() {
 
     // Reset history if channel changed
     if (lastChannelForChartRef.current !== null && lastChannelForChartRef.current !== currentChannel) {
-      setSignalHistory({ signal: [], snr: [], timestamps: [] });
+      setSignalHistory(emptyHistory());
     }
     lastChannelForChartRef.current = currentChannel;
 
     if (currentChannel === 'none' || !tunerStatus.lock) return;
 
     setSignalHistory(prev => {
-      const signal = [...prev.signal, tunerStatus.ss || 0];
-      const snr = [...prev.snr, tunerStatus.snq || 0];
-      const timestamps = [...prev.timestamps, new Date().toLocaleTimeString()];
-
-      if (signal.length > MAX_SIGNAL_HISTORY) {
-        signal.shift();
-        snr.shift();
-        timestamps.shift();
-      }
-
+      // Always keep exactly MAX_SIGNAL_HISTORY slots; shift left, push new value on right
+      const signal = [...prev.signal.slice(1), tunerStatus.ss || 0];
+      const snr = [...prev.snr.slice(1), tunerStatus.snq || 0];
+      const timestamps = [...prev.timestamps.slice(1), new Date().toLocaleTimeString()];
       return { signal, snr, timestamps };
     });
   }, [tunerStatus]);
 
   // Clear chart history when tuner changes
   useEffect(() => {
-    setSignalHistory({ signal: [], snr: [], timestamps: [] });
+    setSignalHistory(emptyHistory());
     lastChannelForChartRef.current = null;
   }, [selectedTuner]);
 
@@ -620,11 +617,12 @@ function SignalMeter() {
         borderWidth: 2,
         fill: true,
         tension: 0.4,
-        pointRadius: 1.5,
-        pointHoverRadius: 5,
+        pointRadius: 2,
+        pointHoverRadius: 3,
         pointBackgroundColor: 'rgba(76, 175, 80, 1)',
         pointBorderColor: 'rgba(0, 0, 0, 0.4)',
-        pointBorderWidth: 1
+        pointBorderWidth: 1,
+        spanGaps: false
       },
       {
         label: 'SNR',
@@ -634,11 +632,12 @@ function SignalMeter() {
         borderWidth: 2,
         fill: true,
         tension: 0.4,
-        pointRadius: 1.5,
-        pointHoverRadius: 5,
+        pointRadius: 2,
+        pointHoverRadius: 3,
         pointBackgroundColor: 'rgba(255, 152, 0, 1)',
         pointBorderColor: 'rgba(0, 0, 0, 0.4)',
-        pointBorderWidth: 1
+        pointBorderWidth: 1,
+        spanGaps: false
       }
     ]
   };
@@ -894,7 +893,7 @@ function SignalMeter() {
                     </Box>
 
                     {/* Signal + SNR History Chart */}
-                    {signalHistory.signal.length > 1 && (
+                    {(
                       <Box sx={{ height: 180, mt: 0.5 }}>
                         <Line data={signalChartData} options={signalChartOptions} plugins={[nowLinePlugin]} />
                       </Box>
