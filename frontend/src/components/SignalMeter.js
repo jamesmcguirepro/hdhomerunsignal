@@ -676,14 +676,16 @@ function SignalMeter() {
         ticks: {
           color: 'rgba(255, 255, 255, 0.55)',
           font: { size: 10 },
-          stepSize: 50,           // ticks at 0, 50, 100
+          stepSize: 25,           // ticks at 0, 25, 50, 75, 100
           callback: (v) => `${v}%`
         },
         grid: {
           color: (ctx) =>
             ctx.tick.value === 50
               ? 'rgba(255, 255, 255, 0.18)'  // mid-line slightly brighter
-              : 'rgba(255, 255, 255, 0.08)',
+              : ctx.tick.value % 25 === 0
+              ? 'rgba(255, 255, 255, 0.10)'
+              : 'rgba(255, 255, 255, 0.05)',
           lineWidth: (ctx) => ctx.tick.value === 50 ? 1.5 : 1
         }
       },
@@ -885,7 +887,7 @@ function SignalMeter() {
 
                     {/* Signal + SNR History Chart */}
                     {signalHistory.signal.length > 1 && (
-                      <Box sx={{ height: 110, mt: 0.5 }}>
+                      <Box sx={{ height: 300, mt: 0.5 }}>
                         <Line data={signalChartData} options={signalChartOptions} plugins={[nowLinePlugin]} />
                       </Box>
                     )}
