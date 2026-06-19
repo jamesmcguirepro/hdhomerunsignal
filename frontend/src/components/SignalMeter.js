@@ -116,18 +116,29 @@ function frequencyToChannel(freqHz, region = 'us') {
   const freqMhz = freqHz / 1000000;
 
   if (region === 'eu') {
+    // UK/EU DVB-T/T2 frequencies
+    // Band III (VHF): 174-230 MHz → channels 5-12
     if (freqMhz >= 174 && freqMhz <= 230) {
+      // Channel 5: 177.5 MHz center, then +7 MHz for each channel
       const channel = Math.round((freqMhz - 177.5) / 7) + 5;
       return Math.max(5, Math.min(12, channel));
     }
+
+    // Band IV/V (UHF): 470-790 MHz → channels 21-60
+    // Note: Post-700MHz clearance, many regions only use 21-48
     if (freqMhz >= 470 && freqMhz <= 790) {
+      // Channel 21: 474 MHz center, then +8 MHz for each channel
       const channel = Math.round((freqMhz - 474) / 8) + 21;
       return Math.max(21, Math.min(60, channel));
     }
-    return null;
+
+    return null; // Unknown frequency range
   }
 
+  // US ATSC frequencies
+  // VHF Low (channels 2-6): 54-88 MHz
   if (freqMhz >= 54 && freqMhz <= 88) {
+    // Channel 2: 57 MHz center, Channel 3: 63, Channel 4: 69, Channel 5: 79, Channel 6: 85
     const vhfLowChannels = [
       { ch: 2, freq: 57 }, { ch: 3, freq: 63 }, { ch: 4, freq: 69 },
       { ch: 5, freq: 79 }, { ch: 6, freq: 85 }
@@ -144,17 +155,21 @@ function frequencyToChannel(freqHz, region = 'us') {
     return closest.ch;
   }
 
+  // VHF High (channels 7-13): 174-216 MHz
   if (freqMhz >= 174 && freqMhz <= 216) {
+    // Channel 7: 177 MHz center, then +6 MHz for each channel
     const channel = Math.round((freqMhz - 177) / 6) + 7;
     return Math.max(7, Math.min(13, channel));
   }
 
+  // UHF (channels 14-36): 470-608 MHz (post-repack)
   if (freqMhz >= 470 && freqMhz <= 608) {
+    // Channel 14: 473 MHz center, then +6 MHz for each channel
     const channel = Math.round((freqMhz - 473) / 6) + 14;
     return Math.max(14, Math.min(36, channel));
   }
 
-  return null;
+  return null; // Unknown frequency range
 }
 
 // Convert broadcast channel number to center frequency (in Hz)
@@ -163,22 +178,28 @@ function channelToFrequency(channel, region = 'us') {
   if (isNaN(ch)) return null;
 
   if (region === 'eu') {
+    // Band III (VHF): channels 5-12
     if (ch >= 5 && ch <= 12) {
       return ((ch - 5) * 7 + 177.5) * 1000000;
     }
+    // Band IV/V (UHF): channels 21-60
     if (ch >= 21 && ch <= 60) {
       return ((ch - 21) * 8 + 474) * 1000000;
     }
     return null;
   }
 
+  // US ATSC frequencies
+  // VHF Low (channels 2-6)
   const vhfLow = { 2: 57, 3: 63, 4: 69, 5: 79, 6: 85 };
   if (vhfLow[ch]) return vhfLow[ch] * 1000000;
 
+  // VHF High (channels 7-13): 177 MHz + 6 MHz per channel
   if (ch >= 7 && ch <= 13) {
     return ((ch - 7) * 6 + 177) * 1000000;
   }
 
+  // UHF (channels 14-36): 473 MHz + 6 MHz per channel
   if (ch >= 14 && ch <= 36) {
     return ((ch - 14) * 6 + 473) * 1000000;
   }
@@ -189,11 +210,12 @@ function channelToFrequency(channel, region = 'us') {
 // Get channel range for region
 function getChannelRange(region) {
   return region === 'eu'
-    ? { min: 5, max: 60 }
-    : { min: 2, max: 36 };
+    ? { min: 5, max: 60 }  // EU: VHF 5-12, UHF 21-60
+    : { min: 2, max: 36 }; // US: VHF 2-13, UHF 14-36
 }
 
 function SignalMeter() {
+  // Load region from localStorage, default to 'us'
   const [region, setRegion] = useState(() => {
     return localStorage.getItem('hdhr-region') || 'us';
   });
@@ -203,6 +225,7 @@ function SignalMeter() {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [selectedTuner, setSelectedTuner] = useState(0);
   const [channelMap, setChannelMap] = useState(() => {
+    // Set default channel map based on region
     return region === 'eu' ? 'eu-bcast' : 'us-bcast';
   });
   const [selectedChannel, setSelectedChannel] = useState('');
@@ -218,7 +241,7 @@ function SignalMeter() {
   const [isAtsc3Channel, setIsAtsc3Channel] = useState(false);
   const [antennaMode, setAntennaMode] = useState(false);
   const [allTunersData, setAllTunersData] = useState([]);
-  const [contextMenu, setContextMenu] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, program }
 
   // Signal history for the chart
   // Pre-fill with nulls so the chart is always MAX_SIGNAL_HISTORY wide;
@@ -231,20 +254,34 @@ function SignalMeter() {
   const [signalHistory, setSignalHistory] = useState(emptyHistory);
   const lastChannelForChartRef = useRef(null);
 
+  // Refs to track current device/tuner/mode for reconnection
   const selectedDeviceRef = React.useRef(selectedDevice);
   const selectedTunerRef = React.useRef(selectedTuner);
   const antennaModeRef = React.useRef(antennaMode);
   const deviceInfoRef = React.useRef(deviceInfo);
   const pendingProgramFetchRef = React.useRef(null);
 
+  // Save region preference to localStorage
   useEffect(() => {
     localStorage.setItem('hdhr-region', region);
   }, [region]);
 
-  React.useEffect(() => { selectedDeviceRef.current = selectedDevice; }, [selectedDevice]);
-  React.useEffect(() => { selectedTunerRef.current = selectedTuner; }, [selectedTuner]);
-  React.useEffect(() => { antennaModeRef.current = antennaMode; }, [antennaMode]);
-  React.useEffect(() => { deviceInfoRef.current = deviceInfo; }, [deviceInfo]);
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    selectedDeviceRef.current = selectedDevice;
+  }, [selectedDevice]);
+
+  React.useEffect(() => {
+    selectedTunerRef.current = selectedTuner;
+  }, [selectedTuner]);
+
+  React.useEffect(() => {
+    antennaModeRef.current = antennaMode;
+  }, [antennaMode]);
+
+  React.useEffect(() => {
+    deviceInfoRef.current = deviceInfo;
+  }, [deviceInfo]);
 
   // Update signal history whenever tunerStatus changes
   useEffect(() => {
@@ -289,6 +326,7 @@ function SignalMeter() {
     newSocket.on('tuner-status', (status) => {
       setTunerStatus(status);
 
+      // Auto-detect ATSC 3.0 based on presence of PLP data
       const hasAtsc3Data = status.plpInfo && Object.keys(status.plpInfo).length > 0;
       setIsAtsc3Channel(hasAtsc3Data);
 
@@ -309,38 +347,63 @@ function SignalMeter() {
       setAllTunersData(data);
     });
 
+    // Handle socket connection/reconnection
     let hasConnectedOnce = false;
 
     newSocket.on('connect', () => {
       if (hasConnectedOnce) {
         console.log('Socket reconnected - restarting monitoring');
+        // On reconnect, restart monitoring if we have a device selected
         if (selectedDeviceRef.current) {
+          // Add small delay to ensure socket is fully ready
           setTimeout(() => {
             if (antennaModeRef.current) {
+              // Restart antenna mode
+              console.log('Emitting start-antenna-mode for device:', selectedDeviceRef.current, 'tuners:', deviceInfoRef.current?.tuners);
               newSocket.emit('start-antenna-mode', {
                 deviceId: selectedDeviceRef.current,
                 tunerCount: deviceInfoRef.current?.tuners || 2
               });
             } else {
+              // Restart normal monitoring
+              console.log('Emitting start-monitoring for device:', selectedDeviceRef.current, 'tuner:', selectedTunerRef.current);
               newSocket.emit('start-monitoring', {
                 deviceId: selectedDeviceRef.current,
                 tuner: selectedTunerRef.current
               });
             }
           }, 100);
+        } else {
+          console.log('No device selected, skipping monitoring restart');
         }
       } else {
         console.log('Socket connected (initial)');
         hasConnectedOnce = true;
+        // Don't start monitoring here - let the useEffect handle it
       }
     });
 
-    newSocket.on('disconnect', (reason) => { console.log('Socket disconnected:', reason); });
-    newSocket.on('connect_error', (error) => { console.log('Socket connection error:', error.message); });
-    newSocket.on('reconnect_attempt', (attemptNumber) => { console.log('Reconnection attempt:', attemptNumber); });
-    newSocket.on('reconnect_error', (error) => { console.log('Reconnection error:', error.message); });
-    newSocket.on('reconnect_failed', () => { console.log('Reconnection failed - gave up'); });
+    newSocket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
+    });
 
+    newSocket.on('connect_error', (error) => {
+      console.log('Socket connection error:', error.message);
+    });
+
+    newSocket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('Reconnection attempt:', attemptNumber);
+    });
+
+    newSocket.on('reconnect_error', (error) => {
+      console.log('Reconnection error:', error.message);
+    });
+
+    newSocket.on('reconnect_failed', () => {
+      console.log('Reconnection failed - gave up');
+    });
+
+    // PWA install prompt handling
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -352,6 +415,7 @@ function SignalMeter() {
       setDeferredPrompt(null);
     };
 
+    // Check if already installed
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
       setShowInstallButton(false);
     } else {
@@ -370,10 +434,17 @@ function SignalMeter() {
 
   useEffect(() => {
     if (selectedDevice && socket) {
-      socket.emit('start-monitoring', { deviceId: selectedDevice, tuner: selectedTuner });
+      console.log('useEffect: Starting monitoring for device:', selectedDevice, 'tuner:', selectedTuner);
+      socket.emit('start-monitoring', {
+        deviceId: selectedDevice,
+        tuner: selectedTuner
+      });
     }
     return () => {
-      if (socket) socket.emit('stop-monitoring');
+      if (socket) {
+        console.log('useEffect cleanup: Stopping monitoring');
+        socket.emit('stop-monitoring');
+      }
     };
   }, [selectedDevice, selectedTuner, socket]);
 
@@ -396,12 +467,15 @@ function SignalMeter() {
     }
   }, [tunerStatus?.channel]);
 
+  // Auto-fetch programs when channel is already tuned on initial load or after tuner change
   useEffect(() => {
     if (tunerStatus?.lock &&
         tunerStatus.channel &&
         tunerStatus.channel !== 'none' &&
         currentChannelPrograms.length === 0 &&
         selectedDevice) {
+      // Channel is tuned but we don't have program info yet - fetch it
+      console.log('Auto-fetching programs for tuner', selectedTuner);
       getCurrentChannelPrograms();
     }
   }, [tunerStatus?.lock, tunerStatus?.channel, selectedDevice, selectedTuner]);
@@ -413,18 +487,29 @@ function SignalMeter() {
     setL1Info(null);
     setIsAtsc3Channel(false);
     setDirectChannel('');
+    // Note: monitoring will restart via the monitoring useEffect, and
+    // the auto-fetch useEffect will repopulate data for the new tuner
   }, [selectedTuner]);
 
+  // Handle antenna mode switching
   useEffect(() => {
     if (!socket || !selectedDevice || !deviceInfo) return;
 
     if (antennaMode) {
+      console.log('Switching to antenna mode');
       socket.emit('stop-monitoring');
-      socket.emit('start-antenna-mode', { deviceId: selectedDevice, tunerCount: deviceInfo.tuners });
+      socket.emit('start-antenna-mode', {
+        deviceId: selectedDevice,
+        tunerCount: deviceInfo.tuners
+      });
     } else {
+      console.log('Switching to normal mode');
       socket.emit('stop-monitoring');
-      socket.emit('start-monitoring', { deviceId: selectedDevice, tuner: selectedTuner });
-      setAllTunersData([]);
+      socket.emit('start-monitoring', {
+        deviceId: selectedDevice,
+        tuner: selectedTuner
+      });
+      setAllTunersData([]); // Clear antenna mode data
     }
   }, [antennaMode, selectedDevice, socket, deviceInfo, selectedTuner]);
 
@@ -434,11 +519,13 @@ function SignalMeter() {
       const url = force ? '/api/devices?force=true' : '/api/devices';
       const response = await axios.get(url);
       setDevices(response.data);
+      // Auto-select first online device
       const firstOnlineDevice = response.data.find(d => d.online !== false);
       if (firstOnlineDevice) {
         setSelectedDevice(firstOnlineDevice.id);
         await getDeviceInfo(firstOnlineDevice.id);
       } else if (response.data.length > 0) {
+        // All devices offline - clear selection
         setSelectedDevice('');
         setDeviceInfo(null);
       }
@@ -451,6 +538,7 @@ function SignalMeter() {
   const getDeviceInfo = async (deviceId) => {
     try {
       const response = await axios.get(`/api/devices/${deviceId}/info`);
+      console.log('Device info received:', response.data);
       setDeviceInfo(response.data);
       return response.data;
     } catch (error) {
