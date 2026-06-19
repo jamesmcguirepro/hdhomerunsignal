@@ -560,7 +560,7 @@ function SignalMeter() {
 
   const tuneToDirectChannel = async (channel) => {
     if (!selectedDevice || !channel) return;
-    
+
     try {
       // Cancel any pending program fetch from previous channel change
       if (pendingProgramFetchRef.current) {
@@ -575,9 +575,10 @@ function SignalMeter() {
       setIsAtsc3Channel(false);
 
       // Use regular tuning - let backend auto-detect ATSC 3.0
-      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, { 
-        channel 
+      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, {
+        channel
       });
+
       setSelectedChannel(channel);
       // Don't clear directChannel - it will be updated by the useEffect when tuner status updates
 
@@ -589,7 +590,7 @@ function SignalMeter() {
       const waitAndGetPrograms = async () => {
         // Initial wait
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
         // Check if this operation was cancelled
         if (fetchToken.cancelled) return;
 
@@ -637,10 +638,13 @@ function SignalMeter() {
     setIsAtsc3Channel(false);
 
     const channelRange = getChannelRange(region);
+
     // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
+    // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
+      // Check for frequency format first
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
       if (freqMatch) {
         const freqHz = parseInt(freqMatch[1]);
@@ -652,6 +656,7 @@ function SignalMeter() {
     }
 
     const nextChannel = Math.min(channelRange.max, currentChannelNum + 1);
+    
     try {
       await tuneToDirectChannel(nextChannel.toString());
     } catch (error) {
@@ -661,15 +666,20 @@ function SignalMeter() {
 
   const decrementChannel = async () => {
     if (!selectedDevice) return;
+
+    // Clear old data immediately
     setCurrentChannelPrograms([]);
     setPlpInfo(null);
     setL1Info(null);
     setIsAtsc3Channel(false);
 
     const channelRange = getChannelRange(region);
+
+    // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
     if (!currentChannelNum && tunerStatus?.channel) {
+      // Check for frequency format first
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
       if (freqMatch) {
         const freqHz = parseInt(freqMatch[1]);
