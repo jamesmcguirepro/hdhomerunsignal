@@ -946,7 +946,7 @@ function SignalMeter() {
                       variant="outlined"
                       size="small"
                       value={directChannel}
-                      onChange={(e) => setDirectChannel(e.target.value)}
+                      onChange={(e) => setDirectChannel(e.target.value.replace(/\D/g, ''))}
                       onKeyPress={(e) => {
                         if (e.key === 'Enter') tuneToDirectChannel(directChannel);
                       }}
@@ -957,7 +957,7 @@ function SignalMeter() {
                         '& .MuiOutlinedInput-input': { padding: '6px 4px', textAlign: 'center', fontSize: '14px' }
                       }}
                       disabled={!selectedDevice}
-                      inputProps={{ maxLength: 2 }}
+                      inputProps={{ maxLength: 2, inputMode: 'numeric', pattern: '[0-9]*' }}
                     />
                     <Button variant="contained" onClick={() => tuneToDirectChannel(directChannel)} disabled={!selectedDevice || !directChannel} size="small" sx={{ minWidth: 'auto', px: 1 }}>
                       <TuneIcon />
