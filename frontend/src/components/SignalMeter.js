@@ -635,6 +635,36 @@ function SignalMeter() {
     ]
   };
 
+  // Plugin that draws a thin vertical "now" line at the rightmost data point
+  const nowLinePlugin = {
+    id: 'nowLine',
+    afterDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      const xScale = scales.x;
+      if (!xScale || !chartArea) return;
+
+      const dataCount = chart.data.labels?.length;
+      if (!dataCount || dataCount < 2) return;
+
+      const x = xScale.getPixelForValue(dataCount - 1);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x, chartArea.top);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+
+      // "now" label above the line
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('now', x - 3, chartArea.top + 9);
+      ctx.restore();
+    }
+  };
+
   const signalChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -644,11 +674,18 @@ function SignalMeter() {
         min: 0,
         max: 100,
         ticks: {
-          color: 'rgba(255, 255, 255, 0.6)',
+          color: 'rgba(255, 255, 255, 0.55)',
           font: { size: 10 },
+          stepSize: 50,           // ticks at 0, 50, 100
           callback: (v) => `${v}%`
         },
-        grid: { color: 'rgba(255, 255, 255, 0.08)' }
+        grid: {
+          color: (ctx) =>
+            ctx.tick.value === 50
+              ? 'rgba(255, 255, 255, 0.18)'  // mid-line slightly brighter
+              : 'rgba(255, 255, 255, 0.08)',
+          lineWidth: (ctx) => ctx.tick.value === 50 ? 1.5 : 1
+        }
       },
       x: { display: false }
     },
@@ -848,8 +885,8 @@ function SignalMeter() {
 
                     {/* Signal + SNR History Chart */}
                     {signalHistory.signal.length > 1 && (
-                      <Box sx={{ height: 100, mt: 0.5 }}>
-                        <Line data={signalChartData} options={signalChartOptions} />
+                      <Box sx={{ height: 110, mt: 0.5 }}>
+                        <Line data={signalChartData} options={signalChartOptions} plugins={[nowLinePlugin]} />
                       </Box>
                     )}
                   </>
