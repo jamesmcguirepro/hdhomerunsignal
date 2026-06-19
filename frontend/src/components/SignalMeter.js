@@ -448,17 +448,24 @@ function SignalMeter() {
     };
   }, [selectedDevice, selectedTuner, socket]);
 
+  // Update directChannel input field when tuner status changes
   useEffect(() => {
     if (tunerStatus?.channel) {
       if (tunerStatus.channel === 'none') {
+        // Tuner is cleared/stopped
         setDirectChannel('');
         setCurrentChannelPrograms([]);
       } else {
+        // Check if format includes frequency (e.g., "auto6t:605028615")
         const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
         if (freqMatch) {
+          // Has frequency - convert to channel number
           const freqHz = parseInt(freqMatch[1]);
           const channel = frequencyToChannel(freqHz, region);
-          if (channel) setDirectChannel(channel.toString());
+          if (channel) {
+            console.log(`Converted frequency ${freqHz} Hz to channel ${channel}`);
+            setDirectChannel(channel.toString());
+          }
         } else {
           const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
           if (channelMatch) setDirectChannel(channelMatch[1]);
