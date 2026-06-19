@@ -656,7 +656,7 @@ function SignalMeter() {
     }
 
     const nextChannel = Math.min(channelRange.max, currentChannelNum + 1);
-    
+
     try {
       await tuneToDirectChannel(nextChannel.toString());
     } catch (error) {
@@ -844,7 +844,9 @@ function SignalMeter() {
                     }}
                   >
                     {REGIONS.map((r) => (
-                      <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>
+                      <MenuItem key={r.value} value={r.value}>
+                        {r.label}
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
@@ -856,8 +858,8 @@ function SignalMeter() {
                     onChange={async (e) => {
                       const newDeviceId = e.target.value;
                       setSelectedDevice(newDeviceId);
-                      // Clear old channel data when switching devices
 
+                      // Clear old channel data when switching devices
                       setCurrentChannelPrograms([]);
                       setPlpInfo(null);
                       setL1Info(null);
