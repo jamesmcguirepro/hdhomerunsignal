@@ -490,6 +490,7 @@ function SignalMeter() {
     }
   }, [tunerStatus?.lock, tunerStatus?.channel, selectedDevice, selectedTuner]);
 
+  // Clear all data when tuner changes
   useEffect(() => {
     console.log('Tuner changed to:', selectedTuner, '- clearing old channel data');
     setCurrentChannelPrograms([]);
@@ -559,8 +560,9 @@ function SignalMeter() {
 
   const tuneToDirectChannel = async (channel) => {
     if (!selectedDevice || !channel) return;
-    // Cancel any pending program fetch from previous channel change
+    
     try {
+      // Cancel any pending program fetch from previous channel change
       if (pendingProgramFetchRef.current) {
         pendingProgramFetchRef.current.cancelled = true;
         pendingProgramFetchRef.current = null;
@@ -573,7 +575,9 @@ function SignalMeter() {
       setIsAtsc3Channel(false);
 
       // Use regular tuning - let backend auto-detect ATSC 3.0
-      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, { channel });
+      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, { 
+        channel 
+      });
       setSelectedChannel(channel);
       // Don't clear directChannel - it will be updated by the useEffect when tuner status updates
 
@@ -585,19 +589,19 @@ function SignalMeter() {
       const waitAndGetPrograms = async () => {
         // Initial wait
         await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Check if this operation was cancelled
         if (fetchToken.cancelled) return;
 
-        // Check if this operation was cancelled
         const firstResponse = await getCurrentChannelPrograms();
 
         // Try again after longer delay for slow-locking channels
         await new Promise(resolve => setTimeout(resolve, 4000));
-        
+
         // Check again if this operation was cancelled before updating state
         if (fetchToken.cancelled) return;
 
         const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
-        
         if (response.data.length > (firstResponse?.length || 0)) {
           setCurrentChannelPrograms(response.data);
         }
@@ -611,6 +615,7 @@ function SignalMeter() {
 
   const getCurrentChannelPrograms = async () => {
     if (!selectedDevice) return [];
+
     try {
       const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
       setCurrentChannelPrograms(response.data);
